@@ -1,3 +1,5 @@
+#pragma once
+
 #include <stdio.h>
 
 #include <stdlib.h>
@@ -16,3 +18,4 @@
 #define MCAST_ADDR  225 << 24 | 1 << 16 | 2 << 8 | 70
 
 #define MAX_MESS_LEN 1400
+#define WINDOW_SIZE 100

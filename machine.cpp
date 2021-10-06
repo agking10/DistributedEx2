@@ -4,11 +4,19 @@ Machine::Machine(int n_packets
         , int machine_index
         , int n_machines
         , int loss_rate) 
-        : n_packets(n_packets)
+        : n_packets_to_send(n_packets)
         , id(machine_index)
         , n_machines(n_machines)
     {
         recv_dbg_init(loss_rate, machine_index);
+        packets = std::vector<std::vector<Message>>(n_machines, std::vector<Message>(WINDOW_SIZE));
+        last_acked
+        = last_rec_cont
+        = last_rec
+        = last_delivered
+        = std::vector<int>(n_machines, 0);
+
+        done_sending = std::vector<bool>(n_machines, false);
     }
 
 void Machine::start() 
@@ -64,10 +72,17 @@ void Machine::start()
 
 void Machine::wait_for_start_signal()
 {
-    //TODO
+    int bytes;
+    while (1)
+    {
+        bytes = recv( rec_socket_, reinterpret_cast<char*>(&message_buf_)
+            , sizeof(message_buf_), 0);
+        if (bytes < sizeof(Message)) continue;
+        if (message_buf_.type == MessageType::START) break;
+    }
 }
 
 void Machine::start_protocol()
 {
-    //TODO
+    std::cout << "Process " << id << " Started!!" << std::endl; 
 }
