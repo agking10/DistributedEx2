@@ -10,7 +10,7 @@ START_MCAST_OBJ = start_mcast.o recv_dbg.o
 all: test start_mcast mcast
 
 test: test.o recv_dbg.o
-	    $(CC) -o test test.o recv_dbg.o  
+	    $(CC) -o test test.o recv_dbg.o
 
 start_mcast: $(START_MCAST_OBJ)
 		$(CXX) -o start_mcast $(START_MCAST_OBJ)
