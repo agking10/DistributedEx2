@@ -4,19 +4,22 @@ Machine::Machine(int n_packets
         , int machine_index
         , int n_machines
         , int loss_rate) 
-        : n_packets_to_send(n_packets)
-        , id(machine_index)
-        , n_machines(n_machines)
+        : n_packets_to_send_(n_packets)
+        , id_(machine_index)
+        , n_machines_(n_machines)
     {
         recv_dbg_init(loss_rate, machine_index);
-        packets = std::vector<std::vector<Message>>(n_machines, std::vector<Message>(WINDOW_SIZE));
-        last_acked
-        = last_rec_cont
-        = last_rec
-        = last_delivered
+        packets_ = std::vector<std::vector<Message>>(n_machines, std::vector<Message>(WINDOW_SIZE));
+        last_rec_cont_
+        = last_rec_
+        = last_delivered_
         = std::vector<int>(n_machines, 0);
 
-        done_sending = std::vector<bool>(n_machines, false);
+        last_acked_ = std::vector<AbsoluteTimestamp>(n_machines);
+        done_sending_ = std::vector<bool>(n_machines, false);
+        send_addr.sin_family = AF_INET;
+        send_addr.sin_addr.s_addr = htonl(MCAST_ADDR);  /* mcast address */
+        send_addr.sin_port = htons(PORT);
     }
 
 void Machine::start() 
@@ -84,5 +87,74 @@ void Machine::wait_for_start_signal()
 
 void Machine::start_protocol()
 {
-    std::cout << "Process " << id << " Started!!" << std::endl; 
+    int num;
+    send_new_packets();
+    while (1)
+    {
+        read_mask_ = mask_;
+        timeout_.tv_usec = MACHINE_TIMEOUT;
+        num = select( FD_SETSIZE
+            , &read_mask_, &write_mask_, &excep_mask_, &timeout_);
+        if (FD_ISSET(rec_socket_, &read_mask_))
+        {
+            handle_packet_in();
+        }
+        else if (num == 0)
+        {
+            if (all_empty()) exit(0);
+            send_undelivered_packets();
+        }
+    }
+}
+
+void Machine::handle_packet_in()
+{
+    sockaddr_in from_addr;
+    socklen_t from_len = sizeof(from_addr);
+    int bytes = recvfrom(rec_socket_
+        , reinterpret_cast<char*>(&message_buf_)
+        , sizeof(Message), 0
+        , (sockaddr*)&from_addr, &from_len);
+    if (bytes < sizeof(Message))
+    {
+        std::cerr << "Short read" << std::endl;
+    }
+
+    if (message_buf_.timestamp > timestamp_)
+    {
+        timestamp_ = message_buf_.timestamp;
+    }
+
+    const int sender_id = message_buf_.pid;
+    const AbsoluteTimestamp last_counter 
+        = message_buf_.ready_to_deliver;
+    const int index = message_buf_.index;
+    
+    packets_[sender_id][index % WINDOW_SIZE] = message_buf_;
+
+    // Check if we have larger continuous window
+    if (index == last_rec_cont_[sender_id] + 1)
+    {
+        update_window_counters(sender_id);
+    }
+
+    // Update cumulative ack for this process
+    last_acked_[sender_id] = std::max(last_acked_[sender_id]
+        , last_counter);
+    AbsoluteTimestamp& min_acked = *std::min_element(last_acked_.begin()
+        , last_acked_.end());
+    if (min_acked > last_acked_all_)
+    {
+        last_acked_all_ = min_acked;
+        deliver_messages();
+        if (!finished_sending_ 
+            && last_sent_ - last_delivered_[id_] < WINDOW_SIZE)
+        {
+            send_new_packets();
+        }
+        else if (finished_sending_ && safe_to_leave_)
+        {
+            send_empty();
+        }
+    }
 }
