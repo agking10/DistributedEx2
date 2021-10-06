@@ -21,6 +21,8 @@ mcast: $(MCAST_OBJ)
 clean:
 	rm *.o
 	rm test
+	rm mcast
+	rm start_mcast
 
 %.o:    %.c
 	$(CC) $(CFLAGS) $*.c
