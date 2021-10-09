@@ -17,9 +17,11 @@ Machine::Machine(int n_packets
 
         last_acked_ = std::vector<AbsoluteTimestamp>(n_machines);
         done_sending_ = std::vector<bool>(n_machines, false);
-        send_addr.sin_family = AF_INET;
-        send_addr.sin_addr.s_addr = htonl(MCAST_ADDR);  /* mcast address */
-        send_addr.sin_port = htons(PORT);
+        send_addr_.sin_family = AF_INET;
+        send_addr_.sin_addr.s_addr = htonl(MCAST_ADDR);  /* mcast address */
+        send_addr_.sin_port = htons(PORT);
+
+        generator_.seed(0);
     }
 
 void Machine::start() 
@@ -78,7 +80,7 @@ void Machine::wait_for_start_signal()
     int bytes;
     while (1)
     {
-        bytes = recv( rec_socket_, reinterpret_cast<char*>(&message_buf_)
+        bytes = recv_dbg( rec_socket_, reinterpret_cast<char*>(&message_buf_)
             , sizeof(message_buf_), 0);
         if (bytes < sizeof(Message)) continue;
         if (message_buf_.type == MessageType::START) break;
@@ -107,6 +109,65 @@ void Machine::start_protocol()
     }
 }
 
+// Iterate starting at the last packet we haven't been able to deliver
+// to the last packet we want to resend
+void Machine::send_undelivered_packets()
+{
+    if (safe_to_leave_) send_empty();
+
+    for (int i = last_delivered_[id_] + 1; 
+        i <= std::min(last_sent_, MAX_RETRANSMIT); i++)
+    {
+        send_packet(i);
+    }
+}
+
+void Machine::send_new_packets()
+{
+    if (finished_sending_) return;
+
+    for (int i = last_sent_ + 1; i < last_delivered_[id_] + WINDOW_SIZE; i++)
+    {
+        write_packet(i);
+        send_packet(i);
+        ++last_sent_;
+        if (i == n_packets_to_send_)
+        {
+            finished_sending_ = true;
+            break;
+        }
+    }
+}
+
+void Machine::write_packet(int index)
+{
+    Message& packet = packets_[id_][index % WINDOW_SIZE];
+    packet.index = index;
+    packet.magic_number = generate_magic_number();
+    packet.pid = id_;
+    packet.timestamp = ++timestamp_;
+}
+
+// Attach cumulative ack to message, send to mcast
+void Machine::send_packet(Message& msg)
+{
+    msg.ready_to_deliver = last_acked_all_;
+    sendto(send_socket_, reinterpret_cast<const char *>(&msg)
+        , sizeof(Message), 0, (sockaddr*)&send_addr_, sizeof(send_addr_));
+}
+
+void Machine::send_packet(int index)
+{
+    send_packet(packets_[id_][index % WINDOW_SIZE]);
+}
+
+// check if done_sending for each machine is true
+bool Machine::all_empty()
+{
+    return std::all_of(done_sending_.begin(), done_sending_.end()
+        , [](bool done){ return done; });
+}
+
 void Machine::handle_packet_in()
 {
     sockaddr_in from_addr;
@@ -131,6 +192,10 @@ void Machine::handle_packet_in()
     const int index = message_buf_.index;
     
     packets_[sender_id][index % WINDOW_SIZE] = message_buf_;
+
+    // update last received value for this sender
+    last_rec_[sender_id] = 
+        std::max(last_rec_[sender_id], message_buf_.index); 
 
     // Check if we have larger continuous window
     if (index == last_rec_cont_[sender_id] + 1)
@@ -157,4 +222,50 @@ void Machine::handle_packet_in()
             send_empty();
         }
     }
+}
+
+void Machine::update_window_counters(int sender)
+{
+    int index = last_rec_cont_[sender];
+    while (packets_[sender][(index + 1) % WINDOW_SIZE].index == index + 1)
+    {
+        index++;
+    }
+    last_rec_cont_[sender] = index;
+}
+
+void Machine::deliver_messages()
+{
+    if (all_empty()) exit(0);
+    int deliver_index;
+    Message& next_to_deliver;
+    while (1)
+    {
+        deliver_index = find_next_to_deliver();
+        next_to_deliver = packets_[deliver_index]
+            [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
+        // check if there are no more packets within this timestamp
+        if (next_to_deliver.ready_to_deliver > last_acked_all_) break;
+        
+        if (next_to_deliver.type == MessageType::EMPTY)
+        {
+            
+        }
+    }
+}
+
+// POTENTIAL BUG HERE: WHAT IS INDEX OF EMPTY???
+void Machine::send_empty()
+{
+    Message msg;
+    msg.type = MessageType::EMPTY;
+    msg.timestamp = ++timestamp_;
+    msg.index = ++last_sent_;
+    send_packet(msg);
+}
+
+
+uint32_t Machine::generate_magic_number()
+{
+    return rng_dst_(generator_);
 }

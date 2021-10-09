@@ -9,12 +9,16 @@ extern "C"
 
 #include <algorithm>
 #include <iostream>
+#include <random>
 #include <vector>
 
 #define MACHINE_TIMEOUT 3000
+#define MAX_RETRANSMIT 15
 
 class Machine
 {
+    using RNG = std::mt19937;
+
 public:
     Machine(int n_packets
         , int machine_index
@@ -31,10 +35,18 @@ private:
     void send_new_packets();
     void send_undelivered_packets();
     bool all_empty();
+    void update_window_counters(int sender);
+    void deliver_messages();
+    void send_empty();
+    void send_packet(Message& msg);
+    void send_packet(int index);
+    void write_packet(int index);
+
+    uint32_t generate_magic_number();
 
     int rec_socket_;
     int send_socket_;
-    sockaddr_in send_addr;
+    sockaddr_in send_addr_;
     fd_set mask_;
     fd_set read_mask_;
     fd_set write_mask_;
@@ -59,4 +71,6 @@ private:
     std::vector<bool> done_sending_;
 
     Message message_buf_;
+    RNG generator_;
+    std::uniform_int_distribution<uint32_t> rng_dst_;
 };

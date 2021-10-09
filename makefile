@@ -4,8 +4,8 @@ CXX=g++
 CFLAGS = -g -c -Wall -pedantic
 CPPFLAGS = -std=c++17
 
-MCAST_OBJ = mcast.o machine.o recv_dbg.o
-START_MCAST_OBJ = start_mcast.o recv_dbg.o
+MCAST_OBJ = mcast.o machine.o recv_dbg.o messages.o
+START_MCAST_OBJ = start_mcast.o recv_dbg.o messages.o
 
 all: test start_mcast mcast
 

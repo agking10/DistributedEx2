@@ -4,14 +4,9 @@
 
 int main(int argc, char* argv[])
 {
-    sockaddr_in name;
     sockaddr_in send_addr;
-    ip_mreq     mreq;
     unsigned char      ttl_val;
     int ss;
-
-    mreq.imr_multiaddr.s_addr = htonl( MCAST_ADDR );
-    mreq.imr_interface.s_addr = htonl( INADDR_ANY );
 
     ss = socket(AF_INET, SOCK_DGRAM, 0); /* Socket for sending */
     if (ss<0) {
