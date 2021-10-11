@@ -7,6 +7,7 @@ Machine::Machine(int n_packets
         : n_packets_to_send_(n_packets)
         , id_(machine_index)
         , n_machines_(n_machines)
+        , rng_dst_(1, 1000000)
     {
         recv_dbg_init(loss_rate, machine_index);
         packets_ = std::vector<std::vector<Message>>(n_machines, std::vector<Message>(WINDOW_SIZE));
@@ -20,7 +21,7 @@ Machine::Machine(int n_packets
         send_addr_.sin_family = AF_INET;
         send_addr_.sin_addr.s_addr = htonl(MCAST_ADDR);  /* mcast address */
         send_addr_.sin_port = htons(PORT);
-
+        //generator_(dev());
         generator_.seed(0);
     }
 
@@ -139,13 +140,15 @@ void Machine::send_new_packets()
     }
 }
 
-void Machine::write_packet(int index)
+void Machine::write_packet(int index, bool isEmpty )
 {
+    if (index < n_packets_to_send_) {
     Message& packet = packets_[id_][index % WINDOW_SIZE];
     packet.index = index;
     packet.magic_number = generate_magic_number();
     packet.pid = id_;
     packet.timestamp = ++timestamp_;
+    }
 }
 
 // Attach cumulative ack to message, send to mcast
@@ -245,11 +248,17 @@ void Machine::deliver_messages()
         next_to_deliver = &packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
-        if (next_to_deliver->ready_to_deliver > last_acked_all_) break;
+        if (AbsoluteTimestamp(ready_to_deliver->timestamp, deliver_index) > last_acked_all_) break;
         
         if (next_to_deliver->type == MessageType::EMPTY)
         {
-            
+            done_sending_[deliver_index] = true;
+        } else {
+            deliver_packet(packets_[deliver_index][(last_delivered_[deliver_index] + 1) % WINDOW_SIZE]);
+            last_delivered_[deliver_index]++;
+            if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) {
+                break;
+            }
         }
     }
 }
@@ -257,6 +266,7 @@ void Machine::deliver_messages()
 // POTENTIAL BUG HERE: WHAT IS INDEX OF EMPTY???
 void Machine::send_empty()
 {
+    write_packet()
     Message msg;
     msg.type = MessageType::EMPTY;
     msg.timestamp = ++timestamp_;
@@ -268,4 +278,15 @@ void Machine::send_empty()
 uint32_t Machine::generate_magic_number()
 {
     return rng_dst_(generator_);
+}
+
+int Machine::find_next_to_deliver() {
+    int min_machine = 0;
+    for (int i = 0; i < n_machines_; i++) {
+        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE]->timestamp < 
+            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE]->timestamp) {
+            min_machine = i;
+        }
+    }
+    return min_machine;
 }

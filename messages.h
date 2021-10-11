@@ -21,6 +21,11 @@ struct AbsoluteTimestamp
     : timestamp(0)
     , machine(0)
     {}
+
+    AbsoluteTimestamp(int timestamp, int machine_index)
+    : timestamp(timestamp)
+    , machine(machine_index)
+    {}
     
     friend bool operator<(const AbsoluteTimestamp& t1
         , const AbsoluteTimestamp& t2);

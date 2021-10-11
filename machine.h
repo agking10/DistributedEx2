@@ -41,7 +41,7 @@ private:
     void send_packet(Message& msg);
     void send_packet(int index);
     void write_packet(int index);
-    int find_next_to_deliver();
+    int  find_next_to_deliver();
 
     uint32_t generate_magic_number();
 
