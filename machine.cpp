@@ -21,7 +21,6 @@ Machine::Machine(int n_packets
         send_addr_.sin_family = AF_INET;
         send_addr_.sin_addr.s_addr = htonl(MCAST_ADDR);  /* mcast address */
         send_addr_.sin_port = htons(PORT);
-        //generator_(dev());
         generator_.seed(0);
     }
 
@@ -79,9 +78,10 @@ void Machine::start()
 void Machine::wait_for_start_signal()
 {
     int bytes;
+    int num;
     while (1)
     {
-        bytes = recv_dbg( rec_socket_, reinterpret_cast<char*>(&message_buf_)
+        bytes = recv( rec_socket_, reinterpret_cast<char*>(&message_buf_)
             , sizeof(message_buf_), 0);
         if (bytes < sizeof(Message)) continue;
         if (message_buf_.type == MessageType::START) break;
@@ -91,6 +91,11 @@ void Machine::wait_for_start_signal()
 void Machine::start_protocol()
 {
     int num;
+    FD_ZERO( &mask_ );
+    FD_ZERO( &write_mask_);
+    FD_ZERO( &read_mask_ );
+    FD_ZERO( &excep_mask_ );
+    FD_SET( rec_socket_, &mask_ );
     send_new_packets();
     while (1)
     {
@@ -179,10 +184,9 @@ void Machine::handle_packet_in()
     bool updated = false;
     sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
-    int bytes = recvfrom(rec_socket_
+    int bytes = recv_dbg(rec_socket_
         , reinterpret_cast<char*>(&message_buf_)
-        , sizeof(Message), 0
-        , (sockaddr*)&from_addr, &from_len);
+        , sizeof(Message), 0);
     if (bytes < sizeof(Message))
     {
         std::cerr << "Short read" << std::endl;
@@ -235,6 +239,7 @@ void Machine::update_window_counters(int sender)
         index++;
     }
     last_rec_cont_[sender] = index;
+    last_acked_[id_] = update_cumulative_ack();
 }
 
 void Machine::deliver_messages()
