@@ -116,7 +116,7 @@ void Machine::send_undelivered_packets()
     if (safe_to_leave_) send_empty();
 
     for (int i = last_delivered_[id_] + 1; 
-        i <= std::min(last_sent_, MAX_RETRANSMIT); i++)
+        i <= std::min(last_sent_, last_delivered_[id_] + MAX_RETRANSMIT); i++)
     {
         send_packet(i);
     }
@@ -238,16 +238,16 @@ void Machine::deliver_messages()
 {
     if (all_empty()) exit(0);
     int deliver_index;
-    Message& next_to_deliver;
+    Message* next_to_deliver;
     while (1)
     {
         deliver_index = find_next_to_deliver();
-        next_to_deliver = packets_[deliver_index]
+        next_to_deliver = &packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
-        if (next_to_deliver.ready_to_deliver > last_acked_all_) break;
+        if (next_to_deliver->ready_to_deliver > last_acked_all_) break;
         
-        if (next_to_deliver.type == MessageType::EMPTY)
+        if (next_to_deliver->type == MessageType::EMPTY)
         {
             
         }
