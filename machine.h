@@ -13,6 +13,7 @@ extern "C"
 #include <vector>
 
 #define MACHINE_TIMEOUT 3000
+#define TIMEOUT 300
 #define MAX_RETRANSMIT 15
 
 class Machine
@@ -40,8 +41,9 @@ private:
     void send_empty();
     void send_packet(Message& msg);
     void send_packet(int index);
-    void write_packet(int index);
+    void write_packet(int index, bool is_empty = false);
     int  find_next_to_deliver();
+    void deliver_packet(Message&);
 
     uint32_t generate_magic_number();
 
@@ -55,6 +57,7 @@ private:
     timeval timeout_;
 
     // Protocol variables
+    int timeout_counter_ = 0;
     int timestamp_ = 0;
     int n_packets_to_send_;
     int id_;

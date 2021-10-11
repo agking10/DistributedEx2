@@ -101,10 +101,18 @@ void Machine::start_protocol()
         if (FD_ISSET(rec_socket_, &read_mask_))
         {
             handle_packet_in();
+            ++timeout_counter_;
+            if (timeout_counter_ > TIMEOUT)
+            {
+                // Potential termination bug
+                // if (all_empty()) exit(0);
+                send_undelivered_packets();
+                timeout_counter_ = 0;
+            }
         }
         else if (num == 0)
         {
-            if (all_empty()) exit(0);
+            //if (all_empty()) exit(0);
             send_undelivered_packets();
         }
     }
@@ -114,8 +122,6 @@ void Machine::start_protocol()
 // to the last packet we want to resend
 void Machine::send_undelivered_packets()
 {
-    if (safe_to_leave_) send_empty();
-
     for (int i = last_delivered_[id_] + 1; 
         i <= std::min(last_sent_, last_delivered_[id_] + MAX_RETRANSMIT); i++)
     {
@@ -125,11 +131,9 @@ void Machine::send_undelivered_packets()
 
 void Machine::send_new_packets()
 {
-    if (finished_sending_) return;
-
     for (int i = last_sent_ + 1; i < last_delivered_[id_] + WINDOW_SIZE; i++)
     {
-        write_packet(i);
+        write_packet(i, finished_sending_);
         send_packet(i);
         ++last_sent_;
         if (i == n_packets_to_send_)
@@ -140,15 +144,14 @@ void Machine::send_new_packets()
     }
 }
 
-void Machine::write_packet(int index, bool isEmpty )
+void Machine::write_packet(int index, bool is_empty)
 {
-    if (index < n_packets_to_send_) {
     Message& packet = packets_[id_][index % WINDOW_SIZE];
     packet.index = index;
     packet.magic_number = generate_magic_number();
     packet.pid = id_;
     packet.timestamp = ++timestamp_;
-    }
+    packet.type = is_empty ? MessageType::EMPTY : MessageType::DATA;
 }
 
 // Attach cumulative ack to message, send to mcast
@@ -173,6 +176,7 @@ bool Machine::all_empty()
 
 void Machine::handle_packet_in()
 {
+    bool updated = false;
     sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
     int bytes = recvfrom(rec_socket_
@@ -220,10 +224,6 @@ void Machine::handle_packet_in()
         {
             send_new_packets();
         }
-        else if (finished_sending_ && safe_to_leave_)
-        {
-            send_empty();
-        }
     }
 }
 
@@ -248,7 +248,7 @@ void Machine::deliver_messages()
         next_to_deliver = &packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
-        if (AbsoluteTimestamp(ready_to_deliver->timestamp, deliver_index) > last_acked_all_) break;
+        if (AbsoluteTimestamp(next_to_deliver->timestamp, deliver_index) > last_acked_all_) break;
         
         if (next_to_deliver->type == MessageType::EMPTY)
         {
@@ -266,7 +266,6 @@ void Machine::deliver_messages()
 // POTENTIAL BUG HERE: WHAT IS INDEX OF EMPTY???
 void Machine::send_empty()
 {
-    write_packet()
     Message msg;
     msg.type = MessageType::EMPTY;
     msg.timestamp = ++timestamp_;
@@ -283,10 +282,21 @@ uint32_t Machine::generate_magic_number()
 int Machine::find_next_to_deliver() {
     int min_machine = 0;
     for (int i = 0; i < n_machines_; i++) {
-        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE]->timestamp < 
-            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE]->timestamp) {
+        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].timestamp < 
+            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE].timestamp) {
             min_machine = i;
         }
     }
     return min_machine;
+}
+
+void Machine::deliver_packet(Message& msg)
+{
+    std::cout << "Machine: "
+    << msg.pid
+    << ", Index: "
+    << msg.index
+    << ", Magic Number: "
+    << msg.magic_number
+    << std::endl;
 }
