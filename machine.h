@@ -12,7 +12,7 @@ extern "C"
 #include <random>
 #include <vector>
 
-#define MACHINE_TIMEOUT 30000
+#define MACHINE_TIMEOUT 300000
 #define TIMEOUT 300
 #define MAX_RETRANSMIT 15
 

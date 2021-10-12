@@ -1,0 +1,14 @@
+Things I did ex: (L100) for line 100:
+
+A bunch of debugging print statements
+
+last_sent_ and last_delivered_ and weird initializations where it would check the 2nd element of array (since we check last_sent + 1 and it starts at 0) so I initialized to -1 (constructor)
+
+added a delivered_ field to keep track of what messages the process has delivered, then ready_to_deliver is set as delivered (to get past the circular problem of you waiting for me to deliver while I wait for you) (L297)
+
+removed the check condition of next_to_deliver compared with last_acked_all since it was running into the problem for the first packet, last acked all is 0 and things ended up never getting delivered (L293)
+
+copied code to the if condition checking if message is empty (L302) since index should still be incremented
+
+
+It now sends 500 packets between 2 processes but there is a termination error as expected
