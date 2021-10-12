@@ -21,6 +21,8 @@ Machine::Machine(int n_packets
         send_addr_.sin_family = AF_INET;
         send_addr_.sin_addr.s_addr = htonl(MCAST_ADDR);  /* mcast address */
         send_addr_.sin_port = htons(PORT);
+        std::fill(last_rec_cont_.begin(), last_rec_cont_.end(), -1);
+        //generator_(dev());
         generator_.seed(0);
     }
 
@@ -162,7 +164,7 @@ void Machine::write_packet(int index, bool is_empty)
 // Attach cumulative ack to message, send to mcast
 void Machine::send_packet(Message& msg)
 {
-    msg.ready_to_deliver = last_acked_all_;
+    msg.ready_to_deliver = delivered_;
     sendto(send_socket_, reinterpret_cast<const char *>(&msg)
         , sizeof(Message), 0, (sockaddr*)&send_addr_, sizeof(send_addr_));
 }
@@ -208,10 +210,12 @@ void Machine::handle_packet_in()
     last_rec_[sender_id] = 
         std::max(last_rec_[sender_id], message_buf_.index); 
 
+    printf("index: %d, last_rec: %d", index, last_rec_cont_[sender_id]);
     // Check if we have larger continuous window
     if (index == last_rec_cont_[sender_id] + 1)
     {
         update_window_counters(sender_id);
+        printf("here\n");
     }
 
     // Update cumulative ack for this process
@@ -219,7 +223,7 @@ void Machine::handle_packet_in()
         , last_counter);
     AbsoluteTimestamp& min_acked = *std::min_element(last_acked_.begin()
         , last_acked_.end());
-    if (min_acked > last_acked_all_)
+    if (ready_to_deliver_)
     {
         last_acked_all_ = min_acked;
         deliver_messages();
@@ -239,7 +243,13 @@ void Machine::update_window_counters(int sender)
         index++;
     }
     last_rec_cont_[sender] = index;
-    last_acked_[id_] = update_cumulative_ack();
+    //last_acked_[id_] = update_cumulative_ack();
+    for (int i = 0; i < n_machines_; i++) {
+        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].index == last_delivered_[i] + 1) {
+            ready_to_deliver_ = true;
+            printf("here2\n");
+        }
+    }
 }
 
 void Machine::deliver_messages()
@@ -254,10 +264,14 @@ void Machine::deliver_messages()
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
         if (AbsoluteTimestamp(next_to_deliver->timestamp, deliver_index) > last_acked_all_) break;
-        
+        delivered_ = AbsoluteTimestamp(next_to_deliver->timestamp, deliver_index);
         if (next_to_deliver->type == MessageType::EMPTY)
         {
             done_sending_[deliver_index] = true;
+            last_delivered_[deliver_index]++;
+            if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) {
+                break;
+            }
         } else {
             deliver_packet(packets_[deliver_index][(last_delivered_[deliver_index] + 1) % WINDOW_SIZE]);
             last_delivered_[deliver_index]++;

@@ -12,7 +12,7 @@ extern "C"
 #include <random>
 #include <vector>
 
-#define MACHINE_TIMEOUT 3000
+#define MACHINE_TIMEOUT 30000
 #define TIMEOUT 300
 #define MAX_RETRANSMIT 15
 
@@ -64,6 +64,8 @@ private:
     int n_machines_;
     int last_sent_ = 0;
     AbsoluteTimestamp last_acked_all_;
+    AbsoluteTimestamp delivered_;
+    bool ready_to_deliver_;
     bool finished_sending_ = false;
     bool safe_to_leave_ = false;
 
