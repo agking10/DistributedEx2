@@ -8,6 +8,7 @@ Machine::Machine(int n_packets
         , id_(machine_index)
         , n_machines_(n_machines)
         , rng_dst_(1, 1000000)
+        , out_file_("Machine_" + std::to_string(id_))
     {
         recv_dbg_init(loss_rate, machine_index);
         packets_ = std::vector<std::vector<Message>>(n_machines, std::vector<Message>(WINDOW_SIZE));
@@ -118,7 +119,11 @@ void Machine::start_protocol()
         {
             send_undelivered_packets();
         }
-        if (all_empty()) exit(0);
+        if (all_empty())
+        {
+            out_file_.close();
+            exit(0);
+        }
     }
 }
 
@@ -206,31 +211,20 @@ void Machine::handle_packet_in()
         return;
     }
 
+    if (message_buf_.stamp.machine == id_) return;
+
     if (message_buf_.stamp.timestamp > timestamp_)
     {
         timestamp_ = message_buf_.stamp.timestamp;
     }
 
-    if (message_buf_.stamp.machine == id_) return;
+
 
     const int sender_id = message_buf_.stamp.machine;
     const AbsoluteTimestamp last_counter 
         = message_buf_.ready_to_deliver;
     const int index = message_buf_.index;
-    
-    packets_[sender_id][index % WINDOW_SIZE] = message_buf_;
 
-    // update last received value for this sender
-    last_rec_[sender_id] = 
-        std::max(last_rec_[sender_id], message_buf_.index); 
-
-    // Check if we have larger continuous window
-    if (index == last_rec_cont_[sender_id] + 1)
-    {
-        update_window_counters(sender_id);
-    }
-
-    // Update cumulative ack for this process
     last_acked_[sender_id] = std::max(last_acked_[sender_id]
         , last_counter);
     last_acked_all_ = *std::min_element(last_acked_.begin()
@@ -244,14 +238,26 @@ void Machine::handle_packet_in()
             send_new_packets();
         }
     }
+    
+    packets_[sender_id][index % WINDOW_SIZE] = message_buf_;
+
+    // update last received value for this sender
+    last_rec_[sender_id] = 
+        std::max(last_rec_[sender_id], message_buf_.index); 
+
+    // Check if we have larger continuous window
+    if (index == last_rec_cont_[sender_id] + 1)
+    {
+        update_window_counters(sender_id);
+    }
 }
 
 bool Machine::can_deliver_messages()
 {
     for (int i = 0; i < n_machines_; i++)
     {
-        if (last_delivered_[i] == last_rec_cont_[i] 
-        || packets_[i][(last_delivered_[i] + 1 % WINDOW_SIZE)].stamp > last_acked_all_)
+        if (last_delivered_[i] >= last_rec_cont_[i] 
+        || packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].stamp > last_acked_all_)
         {
             return false;
         }
@@ -277,6 +283,10 @@ void Machine::deliver_messages()
     while (1)
     {
         deliver_index = find_next_to_deliver();
+        if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) 
+        {
+            break;
+        }
         next_to_deliver = &packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
@@ -288,9 +298,6 @@ void Machine::deliver_messages()
             done_sending_[deliver_index] = true;
         } else {
             deliver_packet(*next_to_deliver);
-            if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) {
-                break;
-            }
         } 
     }
 }
@@ -313,11 +320,11 @@ int Machine::find_next_to_deliver() {
 
 void Machine::deliver_packet(Message& msg)
 {
-    std::cout << "Machine: "
+    out_file_ << "Machine: "
     << msg.stamp.machine
     << ", Index: "
     << msg.index
     << ", Magic Number: "
     << msg.magic_number
-    << std::endl;
+    << "\n";
 }

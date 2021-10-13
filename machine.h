@@ -8,6 +8,7 @@ extern "C"
 #include "messages.h"
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <vector>
@@ -77,6 +78,7 @@ private:
     std::vector<int> last_rec_;
     std::vector<int> last_delivered_;
     std::vector<bool> done_sending_;
+    std::ofstream out_file_;
 
     Message message_buf_;
     RNG generator_;
