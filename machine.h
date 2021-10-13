@@ -47,6 +47,7 @@ private:
     void deliver_packet(Message&);
     void update_cumulative_ack();
     void update_last_acked();
+    bool can_deliver_messages();
 
     uint32_t generate_magic_number();
 

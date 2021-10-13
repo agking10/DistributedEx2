@@ -110,16 +110,15 @@ void Machine::start_protocol()
             if (timeout_counter_ > TIMEOUT)
             {
                 // Potential termination bug
-                // if (all_empty()) exit(0);
                 send_undelivered_packets();
                 timeout_counter_ = 0;
             }
         }
         else if (num == 0)
         {
-            //if (all_empty()) exit(0);
             send_undelivered_packets();
         }
+        if (all_empty()) exit(0);
     }
 }
 
@@ -138,16 +137,15 @@ void Machine::send_new_packets()
 {
     for (int i = last_sent_ + 1; i < last_delivered_[id_] + WINDOW_SIZE; i++)
     {
+        if (i >= n_packets_to_send_)
+        {
+            finished_sending_ = true;
+        }
         write_packet(i, finished_sending_);
         send_packet(i);
         ++last_sent_;
         ++last_rec_cont_[id_];
         ++last_rec_[id_];
-        if (i == n_packets_to_send_)
-        {
-            finished_sending_ = true;
-            break;
-        }
     }
     update_last_acked();
 }
@@ -158,8 +156,8 @@ void Machine::update_last_acked()
     for (int i = 0; i < n_machines_; i++)
     {
         Message& m = packets_[i][last_rec_cont_[i] % WINDOW_SIZE];
-        if (AbsoluteTimestamp(m.timestamp, m.pid) < min) 
-            min = AbsoluteTimestamp(m.timestamp, m.pid);
+        if (m.stamp < min) 
+            min = m.stamp;
     }
     last_acked_[id_] = min;
 }
@@ -169,8 +167,8 @@ void Machine::write_packet(int index, bool is_empty)
     Message& packet = packets_[id_][index % WINDOW_SIZE];
     packet.index = index;
     packet.magic_number = generate_magic_number();
-    packet.pid = id_;
-    packet.timestamp = ++timestamp_;
+    packet.stamp.machine = id_;
+    packet.stamp.timestamp = ++timestamp_;
     packet.type = is_empty ? MessageType::EMPTY : MessageType::DATA;
 }
 
@@ -204,15 +202,18 @@ void Machine::handle_packet_in()
         , sizeof(Message), 0);
     if (bytes < sizeof(Message))
     {
-        std::cerr << "Short read" << std::endl;
+        //std::cerr << "Short read" << std::endl;
+        return;
     }
 
-    if (message_buf_.timestamp > timestamp_)
+    if (message_buf_.stamp.timestamp > timestamp_)
     {
-        timestamp_ = message_buf_.timestamp;
+        timestamp_ = message_buf_.stamp.timestamp;
     }
 
-    const int sender_id = message_buf_.pid;
+    if (message_buf_.stamp.machine == id_) return;
+
+    const int sender_id = message_buf_.stamp.machine;
     const AbsoluteTimestamp last_counter 
         = message_buf_.ready_to_deliver;
     const int index = message_buf_.index;
@@ -232,20 +233,30 @@ void Machine::handle_packet_in()
     // Update cumulative ack for this process
     last_acked_[sender_id] = std::max(last_acked_[sender_id]
         , last_counter);
-    AbsoluteTimestamp& min_acked = *std::min_element(last_acked_.begin()
+    last_acked_all_ = *std::min_element(last_acked_.begin()
         , last_acked_.end());
 
-
-    if (min_acked > last_acked_all_)
+    if (can_deliver_messages())
     {
-        last_acked_all_ = min_acked;
         deliver_messages();
-        if (!finished_sending_ 
-            && last_sent_ - last_delivered_[id_] < WINDOW_SIZE)
+        if (last_sent_ - last_delivered_[id_] < WINDOW_SIZE)
         {
             send_new_packets();
         }
     }
+}
+
+bool Machine::can_deliver_messages()
+{
+    for (int i = 0; i < n_machines_; i++)
+    {
+        if (last_delivered_[i] == last_rec_cont_[i] 
+        || packets_[i][(last_delivered_[i] + 1 % WINDOW_SIZE)].stamp > last_acked_all_)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 void Machine::update_window_counters(int sender)
@@ -261,7 +272,6 @@ void Machine::update_window_counters(int sender)
 
 void Machine::deliver_messages()
 {
-    if (all_empty()) exit(0);
     int deliver_index;
     Message* next_to_deliver;
     while (1)
@@ -270,31 +280,20 @@ void Machine::deliver_messages()
         next_to_deliver = &packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
-        if (AbsoluteTimestamp(next_to_deliver->timestamp, deliver_index) > last_acked_all_) break;
+        if (next_to_deliver->stamp > last_acked_all_) break;
         
+        last_delivered_[deliver_index]++;
         if (next_to_deliver->type == MessageType::EMPTY)
         {
             done_sending_[deliver_index] = true;
         } else {
-            deliver_packet(packets_[deliver_index][(last_delivered_[deliver_index] + 1) % WINDOW_SIZE]);
-            last_delivered_[deliver_index]++;
+            deliver_packet(*next_to_deliver);
             if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) {
                 break;
             }
-        }
+        } 
     }
 }
-
-// POTENTIAL BUG HERE: WHAT IS INDEX OF EMPTY???
-void Machine::send_empty()
-{
-    Message msg;
-    msg.type = MessageType::EMPTY;
-    msg.timestamp = ++timestamp_;
-    msg.index = ++last_sent_;
-    send_packet(msg);
-}
-
 
 uint32_t Machine::generate_magic_number()
 {
@@ -304,8 +303,8 @@ uint32_t Machine::generate_magic_number()
 int Machine::find_next_to_deliver() {
     int min_machine = 0;
     for (int i = 0; i < n_machines_; i++) {
-        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].timestamp < 
-            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE].timestamp) {
+        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].stamp.timestamp < 
+            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE].stamp.timestamp) {
             min_machine = i;
         }
     }
@@ -315,7 +314,7 @@ int Machine::find_next_to_deliver() {
 void Machine::deliver_packet(Message& msg)
 {
     std::cout << "Machine: "
-    << msg.pid
+    << msg.stamp.machine
     << ", Index: "
     << msg.index
     << ", Magic Number: "
