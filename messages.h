@@ -31,6 +31,10 @@ struct AbsoluteTimestamp
         , const AbsoluteTimestamp& t2);
     friend bool operator>(const AbsoluteTimestamp& t1
         , const AbsoluteTimestamp& t2);
+    friend bool operator<=(const AbsoluteTimestamp& t1
+        , const AbsoluteTimestamp& t2);
+    friend bool operator>=(const AbsoluteTimestamp& t1
+        , const AbsoluteTimestamp& t2);
 };
 
 struct RetransmitRequest
@@ -42,8 +46,7 @@ struct RetransmitRequest
 struct Message
 {
     MessageType type;
-    int pid;
-    int timestamp;
+    AbsoluteTimestamp timestamp;
     AbsoluteTimestamp ready_to_deliver;
     int n_retrans;
     RetransmitRequest retrans_req[MAX_NACKS];

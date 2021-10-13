@@ -5,7 +5,7 @@ Machine::Machine(int n_packets
         , int n_machines
         , int loss_rate) 
         : n_packets_to_send_(n_packets)
-        , id_(machine_index)
+        , id_(machine_index - 1)
         , n_machines_(n_machines)
         , rng_dst_(1, 1000000)
     {
@@ -16,14 +16,14 @@ Machine::Machine(int n_packets
         = last_delivered_
         = std::vector<int>(n_machines, 0);
 
-        last_acked_ = std::vector<AbsoluteTimestamp>(n_machines);
+        last_acked_ = last_delivered_stamp_ = std::vector<AbsoluteTimestamp>(n_machines);
         done_sending_ = std::vector<bool>(n_machines, false);
         send_addr_.sin_family = AF_INET;
         send_addr_.sin_addr.s_addr = htonl(MCAST_ADDR);  /* mcast address */
         send_addr_.sin_port = htons(PORT);
         //std::fill(last_rec_cont_.begin(), last_rec_cont_.end(), -1);
-        std::fill(last_delivered_.begin(), last_delivered_.end(), -1);
-        last_sent_ = -1;
+        // std::fill(last_delivered_.begin(), last_delivered_.end(), -1);
+        // last_sent_ = -1;
         //generator_(dev());
         generator_.seed(0);
     }
@@ -147,12 +147,15 @@ void Machine::send_new_packets()
         write_packet(i, finished_sending_);
         send_packet(i);
         ++last_sent_;
+        ++last_rec_[id_];
+        ++last_rec_cont_[id_];
         if (i == n_packets_to_send_)
         {
             finished_sending_ = true;
             break;
         }
     }
+    update_last_acked();
 }
 
 void Machine::write_packet(int index, bool is_empty)
@@ -160,15 +163,15 @@ void Machine::write_packet(int index, bool is_empty)
     Message& packet = packets_[id_][index % WINDOW_SIZE];
     packet.index = index;
     packet.magic_number = generate_magic_number();
-    packet.pid = id_;
-    packet.timestamp = ++timestamp_;
+    packet.timestamp.machine = id_;
+    packet.timestamp.timestamp = ++timestamp_;
     packet.type = is_empty ? MessageType::EMPTY : MessageType::DATA;
 }
 
 // Attach cumulative ack to message, send to mcast
 void Machine::send_packet(Message& msg)
 {
-    msg.ready_to_deliver = delivered_;
+    msg.ready_to_deliver = last_acked_[id_];
     sendto(send_socket_, reinterpret_cast<const char *>(&msg)
         , sizeof(Message), 0, (sockaddr*)&send_addr_, sizeof(send_addr_));
 }
@@ -190,7 +193,7 @@ void Machine::handle_packet_in()
     bool updated = false;
     sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
-    int bytes = recv_dbg(rec_socket_
+    int bytes = recv(rec_socket_
         , reinterpret_cast<char*>(&message_buf_)
         , sizeof(Message), 0);
     if (bytes < sizeof(Message))
@@ -198,12 +201,12 @@ void Machine::handle_packet_in()
         std::cerr << "Short read" << std::endl;
     }
 
-    if (message_buf_.timestamp > timestamp_)
+    if (message_buf_.timestamp.timestamp > timestamp_)
     {
-        timestamp_ = message_buf_.timestamp;
+        timestamp_ = message_buf_.timestamp.timestamp;
     }
 
-    const int sender_id = message_buf_.pid;
+    const int sender_id = message_buf_.timestamp.machine;
 
     if (sender_id == id_) {
         return;
@@ -219,15 +222,15 @@ void Machine::handle_packet_in()
     last_rec_[sender_id] = 
         std::max(last_rec_[sender_id], message_buf_.index); 
 
-    printf("received from machine: %d, index: %d, last_rec: %d ready_: %d, %d\n", sender_id, index, last_rec_cont_[sender_id], last_counter,
+    printf("received from machine: %d, index: %d, last_rec: %d ready_: %d, %d\n", sender_id, index, last_rec_cont_[sender_id], last_counter.timestamp,
         packets_[sender_id][index % WINDOW_SIZE].index);
     fflush(0);
   
     // Check if we have larger continuous window
     if (index == last_rec_cont_[sender_id] + 1)
     {
-        printf("here\n");
-        fflush(0);
+        // printf("here\n");
+        // fflush(0);
         update_window_counters(sender_id);
     }
 
@@ -238,7 +241,7 @@ void Machine::handle_packet_in()
         , last_acked_.end());
 
     //printf("ready? %d\n", ready_to_deliver_);
-    if (ready_to_deliver_)
+    if (can_deliver_messages())
     {
         last_acked_all_ = min_acked;
         deliver_messages();
@@ -250,29 +253,51 @@ void Machine::handle_packet_in()
     }
 }
 
+bool Machine::can_deliver_messages()
+{
+    for (int i = 0; i < n_machines_; i++)
+    {
+        if (last_acked_[i] <= last_delivered_stamp_[i]) return false;
+    }
+
+    return true;
+}
+
 void Machine::update_window_counters(int sender)
 {
     int index = last_rec_cont_[sender];
-    printf("updating window counters %d %d %d \n", sender, index, packets_[sender][(index + 1) % WINDOW_SIZE].index);
-    fflush(0);
+    // printf("updating window counters %d %d %d \n", sender, index, packets_[sender][(index + 1) % WINDOW_SIZE].index);
+    // fflush(0);
     while (packets_[sender][(index + 1) % WINDOW_SIZE].index == index + 1)
     {
         index++;
-        printf("updating window counters-2 %d %d \n", index, packets_[sender][index % WINDOW_SIZE].index);
-        fflush(0);
+        // printf("updating window counters-2 %d %d \n", index, packets_[sender][index % WINDOW_SIZE].index);
+        // fflush(0);
     }
     last_rec_cont_[sender] = index;
     //last_acked_[id_] = update_cumulative_ack();
-    ready_to_deliver_ = true;
-    for (int i = 0; i < n_machines_; i++) {
-        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].index != last_delivered_[i] + 1) {
-            ready_to_deliver_ = false;
-            printf("machine %d at %d index is %d\n", i, (last_delivered_[i] + 1) % WINDOW_SIZE, packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].index);
-            fflush(0);
-            break;
-        }
-    }
+    // ready_to_deliver_ = true;
+    // for (int i = 0; i < n_machines_; i++) {
+    //     if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].index != last_delivered_[i] + 1) {
+    //         ready_to_deliver_ = false;
+    //         printf("machine %d at %d index is %d\n", i, (last_delivered_[i] + 1) % WINDOW_SIZE, packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].index);
+    //         fflush(0);
+    //         break;
+    //     }
+    // }
+    update_last_acked();
     printf("ready to deliver is %d\n", ready_to_deliver_);
+}
+
+void Machine::update_last_acked()
+{
+    AbsoluteTimestamp min(INT_MAX, 0);
+    for (int i = 0; i < n_machines_; i++)
+    {
+        Message& m = packets_[i][last_rec_cont_[i] % WINDOW_SIZE];
+        if (m.timestamp < min) min = m.timestamp;
+    }
+    last_acked_[id_] = min;
 }
 
 void Machine::deliver_messages()
@@ -287,14 +312,15 @@ void Machine::deliver_messages()
         next_to_deliver = &packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
-        printf("delivering message from machine %d index %d stored at: %d\n", deliver_index, next_to_deliver->index, 
-            (last_delivered_[deliver_index] + 1) % WINDOW_SIZE);
-        fflush(0);
+        
         // if (AbsoluteTimestamp(next_to_deliver->timestamp, deliver_index) > last_acked_all_) {
         //     printf("next to deliver is timestamp: %d machine: %d\n", next_to_deliver->timestamp, deliver_index);
         //     break;
         // }
-        delivered_ = AbsoluteTimestamp(next_to_deliver->timestamp, deliver_index);
+        delivered_ = next_to_deliver->timestamp;
+        if (delivered_ > last_acked_all_) break;
+
+        last_delivered_stamp_[deliver_index] = next_to_deliver->timestamp;
         if (next_to_deliver->type == MessageType::EMPTY)
         {
             done_sending_[deliver_index] = true;
@@ -303,6 +329,9 @@ void Machine::deliver_messages()
                 break;
             }
         } else {
+            // printf("delivering message from machine %d index %d stored at: %d\n", deliver_index, next_to_deliver->index, 
+            // (last_delivered_[deliver_index] + 1) % WINDOW_SIZE);
+            // fflush(0);
             deliver_packet(packets_[deliver_index][(last_delivered_[deliver_index] + 1) % WINDOW_SIZE]);
             last_delivered_[deliver_index]++;
             if (last_delivered_[deliver_index] >= last_rec_cont_[deliver_index] - 1) {
@@ -317,7 +346,7 @@ void Machine::send_empty()
 {
     Message msg;
     msg.type = MessageType::EMPTY;
-    msg.timestamp = ++timestamp_;
+    msg.timestamp.timestamp = ++timestamp_;
     msg.index = ++last_sent_;
     send_packet(msg);
 }
@@ -342,7 +371,7 @@ int Machine::find_next_to_deliver() {
 void Machine::deliver_packet(Message& msg)
 {
     std::cout << "Machine: "
-    << msg.pid
+    << msg.timestamp.machine
     << ", Index: "
     << msg.index
     << ", Magic Number: "

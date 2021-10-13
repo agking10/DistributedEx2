@@ -8,6 +8,7 @@ extern "C"
 #include "messages.h"
 
 #include <algorithm>
+#include <limits.h>
 #include <iostream>
 #include <random>
 #include <vector>
@@ -37,6 +38,7 @@ private:
     void send_undelivered_packets();
     bool all_empty();
     void update_window_counters(int sender);
+    bool can_deliver_messages();
     void deliver_messages();
     void send_empty();
     void send_packet(Message& msg);
@@ -44,6 +46,7 @@ private:
     void write_packet(int index, bool is_empty = false);
     int  find_next_to_deliver();
     void deliver_packet(Message&);
+    void update_last_acked();
 
     uint32_t generate_magic_number();
 
@@ -71,6 +74,7 @@ private:
 
     std::vector<std::vector<Message>> packets_;
     std::vector<AbsoluteTimestamp> last_acked_;
+    std::vector<AbsoluteTimestamp> last_delivered_stamp_;
     std::vector<int> last_rec_cont_;
     std::vector<int> last_rec_;
     std::vector<int> last_delivered_;
