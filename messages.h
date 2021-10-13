@@ -48,8 +48,9 @@ struct Message
     MessageType type;
     AbsoluteTimestamp stamp;
     AbsoluteTimestamp ready_to_deliver;
+    AbsoluteTimestamp last_delivered;
     int n_retrans;
-    RetransmitRequest retrans_req[MAX_NACKS];
+    RetransmitRequest retrans_req[MAX_NACKS - 3];
     int index;
     int magic_number; // random number to verify packets are the same
     char data[MAX_MESS_LEN];

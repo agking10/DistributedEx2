@@ -17,6 +17,7 @@ extern "C"
 #define MACHINE_TIMEOUT 3000
 #define TIMEOUT 300
 #define MAX_RETRANSMIT 15
+#define WINDOW_PADDING 5
 
 class Machine
 {
@@ -49,6 +50,7 @@ private:
     void update_cumulative_ack();
     void update_last_acked();
     bool can_deliver_messages();
+    void set_min_acked(const AbsoluteTimestamp& stamp);
 
     uint32_t generate_magic_number();
 

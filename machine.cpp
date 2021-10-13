@@ -140,7 +140,8 @@ void Machine::send_undelivered_packets()
 
 void Machine::send_new_packets()
 {
-    for (int i = last_sent_ + 1; i < last_delivered_[id_] + WINDOW_SIZE; i++)
+    for (int i = last_sent_ + 1; 
+        i < last_delivered_[id_] + WINDOW_SIZE - WINDOW_PADDING; i++)
     {
         if (i >= n_packets_to_send_)
         {
@@ -181,6 +182,7 @@ void Machine::write_packet(int index, bool is_empty)
 void Machine::send_packet(Message& msg)
 {
     msg.ready_to_deliver = last_acked_[id_];
+    msg.last_delivered = last_acked_all_;
     sendto(send_socket_, reinterpret_cast<const char *>(&msg)
         , sizeof(Message), 0, (sockaddr*)&send_addr_, sizeof(send_addr_));
 }
@@ -218,8 +220,6 @@ void Machine::handle_packet_in()
         timestamp_ = message_buf_.stamp.timestamp;
     }
 
-
-
     const int sender_id = message_buf_.stamp.machine;
     const AbsoluteTimestamp last_counter 
         = message_buf_.ready_to_deliver;
@@ -227,8 +227,10 @@ void Machine::handle_packet_in()
 
     last_acked_[sender_id] = std::max(last_acked_[sender_id]
         , last_counter);
+    set_min_acked(message_buf_.last_delivered);
     last_acked_all_ = *std::min_element(last_acked_.begin()
         , last_acked_.end());
+    // last_acked_all_ = std::max(last_acked_all_, message_buf_.last_delivered);
 
     if (can_deliver_messages())
     {
@@ -249,6 +251,14 @@ void Machine::handle_packet_in()
     if (index == last_rec_cont_[sender_id] + 1)
     {
         update_window_counters(sender_id);
+    }
+}
+
+void Machine::set_min_acked(const AbsoluteTimestamp& stamp)
+{
+    for (int i = 0; i < n_machines_; i++)
+    {
+        last_acked_[i] = std::max(stamp, last_acked_[i]);
     }
 }
 
@@ -283,10 +293,6 @@ void Machine::deliver_messages()
     while (1)
     {
         deliver_index = find_next_to_deliver();
-        if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) 
-        {
-            break;
-        }
         next_to_deliver = &packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
@@ -298,6 +304,10 @@ void Machine::deliver_messages()
             done_sending_[deliver_index] = true;
         } else {
             deliver_packet(*next_to_deliver);
+            if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) 
+            {
+                break;
+            }
         } 
     }
 }
@@ -320,11 +330,11 @@ int Machine::find_next_to_deliver() {
 
 void Machine::deliver_packet(Message& msg)
 {
-    out_file_ << "Machine: "
+    std::cout << "Machine: "
     << msg.stamp.machine
     << ", Index: "
     << msg.index
     << ", Magic Number: "
     << msg.magic_number
-    << "\n";
+    << std::endl;
 }
