@@ -11,6 +11,7 @@ extern "C"
 #include <iostream>
 #include <random>
 #include <vector>
+#include "limits.h"
 
 #define MACHINE_TIMEOUT 3000
 #define TIMEOUT 300
@@ -44,6 +45,8 @@ private:
     void write_packet(int index, bool is_empty = false);
     int  find_next_to_deliver();
     void deliver_packet(Message&);
+    void update_cumulative_ack();
+    void update_last_acked();
 
     uint32_t generate_magic_number();
 

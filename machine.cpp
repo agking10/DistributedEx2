@@ -141,12 +141,27 @@ void Machine::send_new_packets()
         write_packet(i, finished_sending_);
         send_packet(i);
         ++last_sent_;
+        ++last_rec_cont_[id_];
+        ++last_rec_[id_];
         if (i == n_packets_to_send_)
         {
             finished_sending_ = true;
             break;
         }
     }
+    update_last_acked();
+}
+
+void Machine::update_last_acked()
+{
+    AbsoluteTimestamp min(INT_MAX, 0);
+    for (int i = 0; i < n_machines_; i++)
+    {
+        Message& m = packets_[i][last_rec_cont_[i] % WINDOW_SIZE];
+        if (AbsoluteTimestamp(m.timestamp, m.pid) < min) 
+            min = AbsoluteTimestamp(m.timestamp, m.pid);
+    }
+    last_acked_[id_] = min;
 }
 
 void Machine::write_packet(int index, bool is_empty)
@@ -162,7 +177,7 @@ void Machine::write_packet(int index, bool is_empty)
 // Attach cumulative ack to message, send to mcast
 void Machine::send_packet(Message& msg)
 {
-    msg.ready_to_deliver = last_acked_all_;
+    msg.ready_to_deliver = last_acked_[id_];
     sendto(send_socket_, reinterpret_cast<const char *>(&msg)
         , sizeof(Message), 0, (sockaddr*)&send_addr_, sizeof(send_addr_));
 }
@@ -219,6 +234,8 @@ void Machine::handle_packet_in()
         , last_counter);
     AbsoluteTimestamp& min_acked = *std::min_element(last_acked_.begin()
         , last_acked_.end());
+
+
     if (min_acked > last_acked_all_)
     {
         last_acked_all_ = min_acked;
@@ -239,7 +256,7 @@ void Machine::update_window_counters(int sender)
         index++;
     }
     last_rec_cont_[sender] = index;
-    last_acked_[id_] = update_cumulative_ack();
+    update_last_acked();
 }
 
 void Machine::deliver_messages()
