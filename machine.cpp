@@ -5,11 +5,13 @@ Machine::Machine(int n_packets
         , int n_machines
         , int loss_rate) 
         : n_packets_to_send_(n_packets)
-        , id_(machine_index)
+        , id_(machine_index - 1)
         , n_machines_(n_machines)
         , rng_dst_(1, 1000000)
         , out_file_("Machine_" + std::to_string(id_))
     {
+        std::cout << "Initializing machine " << machine_index << " of " << n_machines
+        << ".\nPrepared to send " << n_packets << " packets." << std::endl;
         recv_dbg_init(loss_rate, machine_index);
         packets_ = std::vector<std::vector<Message>>(n_machines, std::vector<Message>(WINDOW_SIZE));
         last_rec_cont_
@@ -67,7 +69,7 @@ void Machine::start()
 
     ttl_val = 1;
     if (setsockopt(send_socket_, IPPROTO_IP, IP_MULTICAST_TTL, (void *)&ttl_val, 
-        sizeof(ttl_val)) < 0) 
+        sizeof(ttl_val)) < 0)
     {
         printf("Mcast: problem in setsockopt of multicast ttl %d \n", ttl_val );
     }
@@ -201,7 +203,7 @@ bool Machine::all_empty()
 
 void Machine::handle_packet_in()
 {
-    bool updated = false;
+
     sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
     int bytes = recv_dbg(rec_socket_
@@ -221,7 +223,7 @@ void Machine::handle_packet_in()
     }
 
     const int sender_id = message_buf_.stamp.machine;
-    const AbsoluteTimestamp last_counter 
+    const AbsoluteTimestamp last_counter
         = message_buf_.ready_to_deliver;
     const int index = message_buf_.index;
 
@@ -241,7 +243,10 @@ void Machine::handle_packet_in()
         }
     }
     
-    packets_[sender_id][index % WINDOW_SIZE] = message_buf_;
+    if (message_buf_.index > last_delivered_[sender_id])
+    {
+        packets_[sender_id][index % WINDOW_SIZE] = message_buf_;
+    }
 
     // update last received value for this sender
     last_rec_[sender_id] = 
@@ -252,6 +257,7 @@ void Machine::handle_packet_in()
     {
         update_window_counters(sender_id);
     }
+    update_last_acked();
 }
 
 void Machine::set_min_acked(const AbsoluteTimestamp& stamp)
@@ -266,8 +272,7 @@ bool Machine::can_deliver_messages()
 {
     for (int i = 0; i < n_machines_; i++)
     {
-        if (last_delivered_[i] >= last_rec_cont_[i] 
-        || packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].stamp > last_acked_all_)
+        if (last_delivered_[i] >= last_rec_cont_[i])
         {
             return false;
         }
@@ -283,11 +288,11 @@ void Machine::update_window_counters(int sender)
         index++;
     }
     last_rec_cont_[sender] = index;
-    update_last_acked();
 }
 
 void Machine::deliver_messages()
 {
+    if (all_empty()) exit(0);
     int deliver_index;
     Message* next_to_deliver;
     while (1)
@@ -304,11 +309,11 @@ void Machine::deliver_messages()
             done_sending_[deliver_index] = true;
         } else {
             deliver_packet(*next_to_deliver);
-            if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) 
-            {
-                break;
-            }
         } 
+        if (last_delivered_[deliver_index] == last_rec_cont_[deliver_index]) 
+        {
+            break;
+        }
     }
 }
 
@@ -320,8 +325,8 @@ uint32_t Machine::generate_magic_number()
 int Machine::find_next_to_deliver() {
     int min_machine = 0;
     for (int i = 0; i < n_machines_; i++) {
-        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].stamp.timestamp < 
-            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE].stamp.timestamp) {
+        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].stamp < 
+            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE].stamp) {
             min_machine = i;
         }
     }
@@ -330,11 +335,13 @@ int Machine::find_next_to_deliver() {
 
 void Machine::deliver_packet(Message& msg)
 {
-    std::cout << "Machine: "
+    out_file_ << "Machine: "
     << msg.stamp.machine
     << ", Index: "
     << msg.index
     << ", Magic Number: "
     << msg.magic_number
-    << std::endl;
+    << ", stamp: "
+    << msg.stamp.timestamp
+    << "\n";
 }
