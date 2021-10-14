@@ -13,11 +13,18 @@ Machine::Machine(int n_packets
         std::cout << "Initializing machine " << machine_index << " of " << n_machines
         << ".\nPrepared to send " << n_packets << " packets." << std::endl;
         recv_dbg_init(loss_rate, machine_index);
-        packets_ = std::vector<std::vector<Message>>(n_machines, std::vector<Message>(WINDOW_SIZE));
+        packets_ = std::vector<std::vector<std::shared_ptr<Message>>>(n_machines
+            , std::vector<std::shared_ptr<Message>>(WINDOW_SIZE));
+        
         last_rec_cont_
         = last_rec_
         = last_delivered_
         = std::vector<int>(n_machines, 0);
+
+        for (int i = 0; i < n_machines; i++)
+        {
+            packets_[i][last_rec_cont_[i]] = std::make_shared<Message>();
+        }
 
         last_acked_ = std::vector<AbsoluteTimestamp>(n_machines);
         done_sending_ = std::vector<bool>(n_machines, false);
@@ -27,7 +34,7 @@ Machine::Machine(int n_packets
         generator_.seed(0);
     }
 
-void Machine::start() 
+void Machine::start()
 {
     sockaddr_in name;
     ip_mreq mreq;
@@ -82,12 +89,13 @@ void Machine::wait_for_start_signal()
 {
     int bytes;
     int num;
+    Message message_buf;
     while (1)
     {
-        bytes = recv( rec_socket_, reinterpret_cast<char*>(&message_buf_)
-            , sizeof(message_buf_), 0);
+        bytes = recv( rec_socket_, reinterpret_cast<char*>(&message_buf)
+            , sizeof(message_buf), 0);
         if (bytes < sizeof(Message)) continue;
-        if (message_buf_.type == MessageType::START) break;
+        if (message_buf.type == MessageType::START) break;
     }
 }
 
@@ -99,6 +107,7 @@ void Machine::start_protocol()
     FD_ZERO( &read_mask_ );
     FD_ZERO( &excep_mask_ );
     FD_SET( rec_socket_, &mask_ );
+    auto start = std::chrono::high_resolution_clock::now();
     send_new_packets();
     int timeout = (n_machines_ + 1) * MAX_RETRANSMIT;
     while (1)
@@ -124,10 +133,15 @@ void Machine::start_protocol()
         }
         if (all_empty())
         {
-            out_file_.close();
-            exit(0);
+            goto end;
         }
     }
+    end:
+        auto stop = std::chrono::high_resolution_clock::now();
+        out_file_.close();
+        auto duration = std::chrono::duration_cast<
+            std::chrono::microseconds>(stop - start);
+        std::cout << "Duration: " << duration.count() << " us" << std::endl;
 }
 
 // Iterate starting at the last packet we haven't been able to deliver
@@ -164,7 +178,7 @@ void Machine::update_last_acked()
     AbsoluteTimestamp min(INT_MAX, 0);
     for (int i = 0; i < n_machines_; i++)
     {
-        Message& m = packets_[i][last_rec_cont_[i] % WINDOW_SIZE];
+        Message& m = *packets_[i][last_rec_cont_[i] % WINDOW_SIZE];
         if (m.stamp < min) 
             min = m.stamp;
     }
@@ -173,12 +187,22 @@ void Machine::update_last_acked()
 
 void Machine::write_packet(int index, bool is_empty)
 {
-    Message& packet = packets_[id_][index % WINDOW_SIZE];
-    packet.index = index;
-    packet.magic_number = generate_magic_number();
-    packet.stamp.machine = id_;
-    packet.stamp.timestamp = ++timestamp_;
-    packet.type = is_empty ? MessageType::EMPTY : MessageType::DATA;
+    packets_[id_][index % WINDOW_SIZE] = std::make_shared<Message>();
+    std::shared_ptr<Message> packet = packets_[id_][index % WINDOW_SIZE];
+    packet->index = index;
+    packet->magic_number = generate_magic_number();
+    packet->stamp.machine = id_;
+    if (is_empty)
+    {
+        packet->stamp.timestamp = timestamp_ + 50;
+        timestamp_ += 50;
+    }
+    else
+    {
+        packet->stamp.timestamp = ++timestamp_;
+    }
+    
+    packet->type = is_empty ? MessageType::EMPTY : MessageType::DATA;
 }
 
 // Attach cumulative ack to message, send to mcast
@@ -192,7 +216,7 @@ void Machine::send_packet(Message& msg)
 
 void Machine::send_packet(int index)
 {
-    send_packet(packets_[id_][index % WINDOW_SIZE]);
+    send_packet(*packets_[id_][index % WINDOW_SIZE]);
     if (index % 1000 == 0) {
         printf("index: %d\n", index);
         fflush(0);
@@ -211,57 +235,48 @@ void Machine::handle_packet_in()
 
     sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
+
+    std::shared_ptr<Message> message_buf = std::make_shared<Message>();
+
     int bytes = recv_dbg(rec_socket_
-        , reinterpret_cast<char*>(&message_buf_)
+        , reinterpret_cast<char*>(&(*message_buf))
         , sizeof(Message), 0);
     if (bytes < sizeof(Message))
-    {
-        //std::cerr << "Short read" << std::endl;
         return;
-    }
 
-    if (message_buf_.stamp.machine == id_) return;
+    if (message_buf->stamp.machine == id_) return;
 
-    if (message_buf_.stamp.timestamp > timestamp_)
-    {
-        timestamp_ = message_buf_.stamp.timestamp;
-    }
+    if (message_buf->stamp.timestamp > timestamp_)
+        timestamp_ = message_buf->stamp.timestamp;
 
-    const int sender_id = message_buf_.stamp.machine;
+    const int sender_id = message_buf->stamp.machine;
     const AbsoluteTimestamp last_counter
-        = message_buf_.ready_to_deliver;
-    const int index = message_buf_.index;
+        = message_buf->ready_to_deliver;
+    const int index = message_buf->index;
 
     last_acked_[sender_id] = std::max(last_acked_[sender_id]
         , last_counter);
-    set_min_acked(message_buf_.last_delivered);
+    set_min_acked(message_buf->last_delivered);
     last_acked_all_ = *std::min_element(last_acked_.begin()
         , last_acked_.end());
-    // last_acked_all_ = std::max(last_acked_all_, message_buf_.last_delivered);
 
     if (can_deliver_messages())
     {
         deliver_messages();
         if (last_sent_ - last_delivered_[id_] < WINDOW_SIZE)
-        {
             send_new_packets();
-        }
     }
     
-    if (message_buf_.index > last_delivered_[sender_id])
-    {
-        packets_[sender_id][index % WINDOW_SIZE] = message_buf_;
-    }
+    if (message_buf->index > last_delivered_[sender_id])
+        packets_[sender_id][index % WINDOW_SIZE] = message_buf;
 
     // update last received value for this sender
     last_rec_[sender_id] = 
-        std::max(last_rec_[sender_id], message_buf_.index); 
+        std::max(last_rec_[sender_id], message_buf->index); 
 
     // Check if we have larger continuous window
     if (index == last_rec_cont_[sender_id] + 1)
-    {
         update_window_counters(sender_id);
-    }
     update_last_acked();
 }
 
@@ -288,7 +303,8 @@ bool Machine::can_deliver_messages()
 void Machine::update_window_counters(int sender)
 {
     int index = last_rec_cont_[sender];
-    while (packets_[sender][(index + 1) % WINDOW_SIZE].index == index + 1)
+    while (packets_[sender][(index + 1) % WINDOW_SIZE]
+        && packets_[sender][(index + 1) % WINDOW_SIZE]->index == index + 1)
     {
         index++;
     }
@@ -297,13 +313,16 @@ void Machine::update_window_counters(int sender)
 
 void Machine::deliver_messages()
 {
-    if (all_empty()) exit(0);
+    // if (all_empty())
+    // {
+    //     finish();
+    // }
     int deliver_index;
-    Message* next_to_deliver;
+    std::shared_ptr<Message> next_to_deliver;
     while (1)
     {
         deliver_index = find_next_to_deliver();
-        next_to_deliver = &packets_[deliver_index]
+        next_to_deliver = packets_[deliver_index]
             [(last_delivered_[deliver_index] + 1) % WINDOW_SIZE];
         // check if there are no more packets within this timestamp
         if (next_to_deliver->stamp > last_acked_all_) break;
@@ -330,8 +349,8 @@ uint32_t Machine::generate_magic_number()
 int Machine::find_next_to_deliver() {
     int min_machine = 0;
     for (int i = 0; i < n_machines_; i++) {
-        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE].stamp < 
-            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE].stamp) {
+        if (packets_[i][(last_delivered_[i] + 1) % WINDOW_SIZE]->stamp < 
+            packets_[min_machine][(last_delivered_[min_machine] + 1) % WINDOW_SIZE]->stamp) {
             min_machine = i;
         }
     }
@@ -349,4 +368,9 @@ void Machine::deliver_packet(Message& msg)
     << ", stamp: "
     << msg.stamp.timestamp
     << "\n";
+}
+
+void Machine::finish()
+{
+    // goto end;
 }

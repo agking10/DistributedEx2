@@ -8,8 +8,10 @@ extern "C"
 #include "messages.h"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <vector>
 #include "limits.h"
@@ -33,6 +35,12 @@ public:
     void start();
 
 private:
+    struct MessageSlot
+    {
+        bool full;
+        Message data;
+    };
+
     void wait_for_start_signal();
     void start_protocol();
     void handle_packet_in();
@@ -51,6 +59,7 @@ private:
     void update_last_acked();
     bool can_deliver_messages();
     void set_min_acked(const AbsoluteTimestamp& stamp);
+    void finish();
 
     uint32_t generate_magic_number();
 
@@ -74,7 +83,7 @@ private:
     bool finished_sending_ = false;
     bool safe_to_leave_ = false;
 
-    std::vector<std::vector<Message>> packets_;
+    std::vector<std::vector<std::shared_ptr<Message>>> packets_;
     std::vector<AbsoluteTimestamp> last_acked_;
     std::vector<int> last_rec_cont_;
     std::vector<int> last_rec_;
@@ -82,7 +91,7 @@ private:
     std::vector<bool> done_sending_;
     std::ofstream out_file_;
 
-    Message message_buf_;
+    // Message message_buf_;
     RNG generator_;
     std::uniform_int_distribution<uint32_t> rng_dst_;
 };

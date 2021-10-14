@@ -2,7 +2,7 @@
 
 #include "net_include.h"
 
-#define MAX_NACKS 9
+#define MAX_NACKS 6
 
 enum class MessageType : char
 {
@@ -43,14 +43,26 @@ struct RetransmitRequest
     int machine;
 };
 
-struct Message
+struct MessageBody
 {
     MessageType type;
-    AbsoluteTimestamp stamp;
     AbsoluteTimestamp ready_to_deliver;
     AbsoluteTimestamp last_delivered;
     int n_retrans;
-    RetransmitRequest retrans_req[MAX_NACKS - 3];
+    // RetransmitRequest retrans_req[MAX_NACKS];
+    int index;
+    int magic_number; // random number to verify packets are the same
+    char data[MAX_MESS_LEN];
+};
+
+struct Message
+{
+    AbsoluteTimestamp stamp;
+    MessageType type;
+    AbsoluteTimestamp ready_to_deliver;
+    AbsoluteTimestamp last_delivered;
+    int n_retrans;
+    // RetransmitRequest retrans_req[MAX_NACKS];
     int index;
     int magic_number; // random number to verify packets are the same
     char data[MAX_MESS_LEN];
