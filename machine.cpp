@@ -100,6 +100,7 @@ void Machine::start_protocol()
     FD_ZERO( &excep_mask_ );
     FD_SET( rec_socket_, &mask_ );
     send_new_packets();
+    int timeout = (n_machines_ + 1) * MAX_RETRANSMIT;
     while (1)
     {
         read_mask_ = mask_;
@@ -110,7 +111,7 @@ void Machine::start_protocol()
         {
             handle_packet_in();
             ++timeout_counter_;
-            if (timeout_counter_ > TIMEOUT)
+            if (timeout_counter_ > timeout)
             {
                 // Potential termination bug
                 send_undelivered_packets();
@@ -192,6 +193,10 @@ void Machine::send_packet(Message& msg)
 void Machine::send_packet(int index)
 {
     send_packet(packets_[id_][index % WINDOW_SIZE]);
+    if (index % 1000 == 0) {
+        printf("index: %d\n", index);
+        fflush(0);
+    }
 }
 
 // check if done_sending for each machine is true
