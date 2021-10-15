@@ -4,11 +4,11 @@
 
 #define MAX_NACKS 6
 
-enum class MessageType : char
+enum class MessageType
 {
-    START = 's',
-    DATA = 'd',
-    EMPTY = 'e',
+    START,
+    DATA,
+    EMPTY,
 };
 
 // Struct used for providing absolute ordering to timestamps
@@ -48,7 +48,7 @@ struct MessageBody
     MessageType type;
     AbsoluteTimestamp ready_to_deliver;
     AbsoluteTimestamp last_delivered;
-    int n_retrans;
+    // int n_retrans;
     // RetransmitRequest retrans_req[MAX_NACKS];
     int index;
     int magic_number; // random number to verify packets are the same
