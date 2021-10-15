@@ -8,7 +8,7 @@ Machine::Machine(int n_packets
         , id_(machine_index - 1)
         , n_machines_(n_machines)
         , rng_dst_(1, 1000000)
-        , out_file_("Machine_" + std::to_string(id_))
+        , out_file_(std::to_string(machine_index) + ".txt")
     {
         std::cout << "Initializing machine " << machine_index << " of " << n_machines
         << ".\nPrepared to send " << n_packets << " packets." << std::endl;
@@ -359,14 +359,12 @@ int Machine::find_next_to_deliver() {
 
 void Machine::deliver_packet(Message& msg)
 {
-    out_file_ << "Machine: "
+    out_file_
     << msg.stamp.machine
-    << ", Index: "
+    << " "
     << msg.index
-    << ", Magic Number: "
+    << " "
     << msg.magic_number
-    << ", stamp: "
-    << msg.stamp.timestamp
     << "\n";
 }
 
