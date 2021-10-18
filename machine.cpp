@@ -139,7 +139,6 @@ void Machine::start_protocol()
     }
     end:
         auto stop = std::chrono::high_resolution_clock::now();
-        // out_file_.close();
         fclose(fd_);
         auto duration = std::chrono::duration_cast<
             std::chrono::microseconds>(stop - start);
