@@ -17,7 +17,7 @@ extern "C"
 #include "limits.h"
 
 #define MACHINE_TIMEOUT 3000
-#define TIMEOUT 300
+#define TIMEOUT 35
 #define MAX_RETRANSMIT 15
 #define WINDOW_PADDING 5
 
@@ -46,7 +46,10 @@ private:
     void handle_packet_in();
     void send_new_packets();
     void send_undelivered_packets();
+    void send_nacks();
+    void process_retrans(std::shared_ptr<Message> msg);
     bool all_empty();
+    void find_holes(int machine, RetransmitRequest * buf, int& count);
     void update_window_counters(int sender);
     void deliver_messages();
     void send_empty();
@@ -59,7 +62,6 @@ private:
     void update_last_acked();
     bool can_deliver_messages();
     void set_min_acked(const AbsoluteTimestamp& stamp);
-    void finish();
 
     uint32_t generate_magic_number();
 
@@ -77,6 +79,7 @@ private:
     int timestamp_ = 0;
     int n_packets_to_send_;
     int id_;
+    FILE * fd_;
     int n_machines_;
     int last_sent_ = 0;
     AbsoluteTimestamp last_acked_all_;
@@ -89,7 +92,6 @@ private:
     std::vector<int> last_rec_;
     std::vector<int> last_delivered_;
     std::vector<bool> done_sending_;
-    std::ofstream out_file_;
 
     // Message message_buf_;
     RNG generator_;

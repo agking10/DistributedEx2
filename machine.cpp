@@ -8,7 +8,6 @@ Machine::Machine(int n_packets
         , id_(machine_index - 1)
         , n_machines_(n_machines)
         , rng_dst_(1, 1000000)
-        , out_file_(std::to_string(machine_index) + ".txt")
     {
         std::cout << "Initializing machine " << machine_index << " of " << n_machines
         << ".\nPrepared to send " << n_packets << " packets." << std::endl;
@@ -26,6 +25,8 @@ Machine::Machine(int n_packets
             packets_[i][last_rec_cont_[i]] = std::make_shared<Message>();
         }
 
+        std::string fname = std::to_string(machine_index) + ".txt";
+        fd_ = fopen(fname.c_str(), "w");
         last_acked_ = std::vector<AbsoluteTimestamp>(n_machines);
         done_sending_ = std::vector<bool>(n_machines, false);
         send_addr_.sin_family = AF_INET;
@@ -109,7 +110,7 @@ void Machine::start_protocol()
     FD_SET( rec_socket_, &mask_ );
     auto start = std::chrono::high_resolution_clock::now();
     send_new_packets();
-    int timeout = (n_machines_ + 1) * MAX_RETRANSMIT;
+    int timeout = (n_machines_ + 1) * TIMEOUT;
     while (1)
     {
         read_mask_ = mask_;
@@ -122,9 +123,8 @@ void Machine::start_protocol()
             ++timeout_counter_;
             if (timeout_counter_ > timeout)
             {
-                // Potential termination bug
-                send_undelivered_packets();
                 timeout_counter_ = 0;
+                send_nacks();
             }
         }
         else if (num == 0)
@@ -138,7 +138,8 @@ void Machine::start_protocol()
     }
     end:
         auto stop = std::chrono::high_resolution_clock::now();
-        out_file_.close();
+        // out_file_.close();
+        fclose(fd_);
         auto duration = std::chrono::duration_cast<
             std::chrono::microseconds>(stop - start);
         std::cout << "Duration: " << duration.count() << " us" << std::endl;
@@ -171,6 +172,42 @@ void Machine::send_new_packets()
         ++last_rec_[id_];
     }
     update_last_acked();
+}
+
+void Machine::send_nacks()
+{
+    Message retrans;
+    retrans.stamp.machine = id_;
+    retrans.type = MessageType::RETRANS;
+    int count = 0;
+    for (int i = 0; i < n_machines_; i++)
+    {
+        if (i == id_) continue;
+        if (last_rec_[i] > last_rec_cont_[i])
+        {
+            find_holes(i, reinterpret_cast<RetransmitRequest*>(retrans.data), count);
+            if (count > MAX_NACKS) return;
+        }
+    }
+    retrans.n_retrans = count;
+    if (count > 0)
+        send_packet(retrans);
+}
+
+void Machine::find_holes(int machine, RetransmitRequest * buf, int& count)
+{
+    for (int i = last_rec_cont_[machine] + 1;
+        i < last_rec_[machine]; i++)
+    {
+        if (!packets_[machine][i % WINDOW_SIZE] 
+            || packets_[machine][i % WINDOW_SIZE]->index != i)
+        {
+            buf[count].packet_no = i;
+            buf[count].machine = machine;
+            ++count;
+            if (count > MAX_NACKS) return;
+        }
+    }
 }
 
 void Machine::update_last_acked()
@@ -217,7 +254,7 @@ void Machine::send_packet(Message& msg)
 void Machine::send_packet(int index)
 {
     send_packet(*packets_[id_][index % WINDOW_SIZE]);
-    if (index % 1000 == 0) {
+    if (index % 10000 == 0) {
         printf("index: %d\n", index);
         fflush(0);
     }
@@ -232,9 +269,9 @@ bool Machine::all_empty()
 
 void Machine::handle_packet_in()
 {
-
     sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
+
 
     std::shared_ptr<Message> message_buf = std::make_shared<Message>();
 
@@ -245,6 +282,12 @@ void Machine::handle_packet_in()
         return;
 
     if (message_buf->stamp.machine == id_) return;
+
+    if (message_buf->type == MessageType::RETRANS)
+    {
+        process_retrans(message_buf);
+        return;
+    }
 
     if (message_buf->stamp.timestamp > timestamp_)
         timestamp_ = message_buf->stamp.timestamp;
@@ -280,6 +323,19 @@ void Machine::handle_packet_in()
     update_last_acked();
 }
 
+void Machine::process_retrans(std::shared_ptr<Message> msg)
+{
+    RetransmitRequest * nacks = 
+        reinterpret_cast<RetransmitRequest*>(msg->data);
+    for (int i = 0; i < msg->n_retrans; i++)
+    {
+        if (nacks[i].machine == id_ && nacks[i].packet_no > last_delivered_[id_])
+        {
+            send_packet(nacks[i].packet_no);
+        }
+    }
+}
+
 void Machine::set_min_acked(const AbsoluteTimestamp& stamp)
 {
     for (int i = 0; i < n_machines_; i++)
@@ -313,10 +369,6 @@ void Machine::update_window_counters(int sender)
 
 void Machine::deliver_messages()
 {
-    // if (all_empty())
-    // {
-    //     finish();
-    // }
     int deliver_index;
     std::shared_ptr<Message> next_to_deliver;
     while (1)
@@ -359,16 +411,5 @@ int Machine::find_next_to_deliver() {
 
 void Machine::deliver_packet(Message& msg)
 {
-    out_file_
-    << msg.stamp.machine
-    << " "
-    << msg.index
-    << " "
-    << msg.magic_number
-    << "\n";
-}
-
-void Machine::finish()
-{
-    // goto end;
+    fprintf(fd_, "%2d, %8d, %8d\n", msg.stamp.machine, msg.index, msg.magic_number);
 }

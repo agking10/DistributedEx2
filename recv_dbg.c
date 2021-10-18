@@ -35,11 +35,11 @@ int recv_dbg(int s, char *buf, int len, int flags)
         decision = rand() % 100 + 1;
 	
         gettimeofday( &current_time, NULL );
-        if( current_time.tv_sec - init_time.tv_sec > 180 ) 
-        {
-            printf("recv_dbg: time is up - killing the process \n");
-            exit( 1 );
-        }
+        // if( current_time.tv_sec - init_time.tv_sec > 180 ) 
+        // {
+        //     printf("recv_dbg: time is up - killing the process \n");
+        //     exit( 1 );
+        // }
 
         ret = recv( s, buf, len, flags );
         if( ( ret > 0 ) && ( cutoff > 0 ) && ( decision <= cutoff ) )

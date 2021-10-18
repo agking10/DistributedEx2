@@ -2,13 +2,13 @@
 
 #include "net_include.h"
 
-#define MAX_NACKS 6
 
 enum class MessageType
 {
     START,
     DATA,
     EMPTY,
+    RETRANS
 };
 
 // Struct used for providing absolute ordering to timestamps
@@ -57,8 +57,8 @@ struct MessageBody
 
 struct Message
 {
-    AbsoluteTimestamp stamp;
     MessageType type;
+    AbsoluteTimestamp stamp;
     AbsoluteTimestamp ready_to_deliver;
     AbsoluteTimestamp last_delivered;
     int n_retrans;
@@ -67,4 +67,6 @@ struct Message
     int magic_number; // random number to verify packets are the same
     char data[MAX_MESS_LEN];
 };
+
+#define MAX_NACKS 1400 / sizeof(RetransmitRequest)
 
