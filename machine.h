@@ -18,6 +18,7 @@ extern "C"
 
 #define MACHINE_TIMEOUT 3000
 #define TIMEOUT 35
+#define KEEP_ALIVE 5
 #define MAX_RETRANSMIT 15
 #define WINDOW_PADDING 5
 

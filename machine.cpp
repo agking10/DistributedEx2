@@ -11,7 +11,7 @@ Machine::Machine(int n_packets
     {
         std::cout << "Initializing machine " << machine_index << " of " << n_machines
         << ".\nPrepared to send " << n_packets << " packets." << std::endl;
-        recv_dbg_init(loss_rate, machine_index);
+        recv_dbg_init(std::max(loss_rate, 1), machine_index);
         packets_ = std::vector<std::vector<std::shared_ptr<Message>>>(n_machines
             , std::vector<std::shared_ptr<Message>>(WINDOW_SIZE));
         
@@ -111,6 +111,7 @@ void Machine::start_protocol()
     auto start = std::chrono::high_resolution_clock::now();
     send_new_packets();
     int timeout = (n_machines_ + 1) * TIMEOUT;
+    int keepalive = (n_machines_ + 1) * KEEP_ALIVE;
     while (1)
     {
         read_mask_ = mask_;
@@ -121,7 +122,7 @@ void Machine::start_protocol()
         {
             handle_packet_in();
             ++timeout_counter_;
-            if (timeout_counter_ > timeout)
+            if (timeout_counter_ % timeout == 0)
             {
                 timeout_counter_ = 0;
                 send_nacks();
